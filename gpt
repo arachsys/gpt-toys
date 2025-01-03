@@ -1,0 +1,63 @@
+#!/bin/bash
+
+set -o pipefail
+export LANG=C.UTF-8
+
+export API=${API:-https://api.openai.com/v1/chat/completions}
+export KEY=${KEY:-$(< ~/.config/secrets/openai)}
+export MODEL=${MODEL:-gpt-4o}
+
+if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ $1 == -* ]]; then
+  echo "Usage: ${0##*/} [PROMPT] < INPUT" 2>&1
+  exit 64
+elif [[ -t 0 ]]; then
+  exec < /dev/null
+fi
+
+exec 3<<EOF
+{
+  "model": env.MODEL,
+  "messages": [
+    { "role": "system", "content": env.PROMPT },
+    { "role": "user", "content": . | rtrimstr("\\n") }
+  ]
+} | .messages[] |= select(.content and .content != "")
+EOF
+
+exec 4<<EOF
+Authorization: Bearer $KEY
+Content-Type: application/json
+EOF
+
+exec 5<<EOF
+.choices[0].message.content,
+if .choices[0].finish_reason != "stop" then
+  "[Truncated: \\(.choices[0].finish_reason)]"
+else
+  empty
+end
+EOF
+
+PROMPT=$* jq -f /dev/fd/3 -s -R \
+  | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$API" \
+  | jq -e -f /dev/fd/5 -r \
+  | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/\s\?—\s\?/ - /g' \
+  | fmt -s -w 76
+
+if set -- $? ${PIPESTATUS[1]} && [[ $1 -ne 0 ]]; then
+  case $2 in
+    0)
+      echo "Invalid response from model"
+      ;;
+    6|7)
+      echo "Failed to connect to host"
+      ;;
+    28)
+      echo "Content generation timed out"
+      ;;
+    *)
+      echo "Content generation failed: $2"
+      ;;
+  esac >&2
+  exit 1
+fi
