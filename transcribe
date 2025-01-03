@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -o pipefail
+export LANG=C.UTF-8
+
+export API=${API:-https://api.openai.com/v1/audio/transcriptions}
+export KEY=${KEY:-$(< ~/.config/secrets/openai)}
+export MODEL=${MODEL:-whisper-1}
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: ${0##*/} AUDIOFILE" >&2
+  exit 64
+elif [[ ! -f $1 ]]; then
+  echo "Audio file not found: $1" >&2
+  exit 1
+fi
+
+curl -f -m 30 -s -F file="@$1" -F model="$MODEL" -F response_format=text \
+     -H @- "$API" <<< "Authorization: Bearer $KEY" \
+  | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/\s\?—\s\?/ - /g' \
+  | fmt -s -w 76
+
+if set -- $? && [[ $1 -ne 0 ]]; then
+  case $1 in
+    6|7)
+      echo "Failed to connect to host"
+      ;;
+    28)
+      echo "Transcription timed out"
+      ;;
+    *)
+      echo "Transcription failed: $1"
+      ;;
+  esac >&2
+  exit 1
+fi
