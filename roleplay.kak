@@ -105,9 +105,9 @@ EOF
     try %{
       execute-keys -draft '<a-K>.\n\z<ret>u'
     } catch %{
-      execute-keys -draft 'lGes\A\n*\z<ret>d'
+      execute-keys -draft 'lGes\A\s*\z<ret>d'
     } catch %{
-      execute-keys -draft 'lGes\A\n+<ret>d2<a-O>'
+      execute-keys -draft 'lGes\A\s*\n<ret>d2<a-O>'
     }
   }
 }
