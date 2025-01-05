@@ -36,7 +36,7 @@ fromjson?
   | gsub("[‘’]"; "'")?
   | gsub("[“”]"; "\\"")?
   | gsub("…"; "...")?
-  | gsub("\\\\s?—\\\\s?"; " - ")?
+  | gsub(" ?— ?"; " - ")?
 EOF
 
 PROMPT=$* jq -f /dev/fd/3 -s -R \

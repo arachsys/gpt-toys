@@ -17,7 +17,7 @@ fi
 
 curl -f -m 30 -s -F file="@$1" -F model="$MODEL" -F response_format=text \
      -H @- "$API" <<< "Authorization: Bearer $KEY" \
-  | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/\s\?—\s\?/ - /g' \
+  | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/ \?— \?/ - /g' \
   | fmt -s -w 76
 
 if set -- $? && [[ $1 -ne 0 ]]; then
