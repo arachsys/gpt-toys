@@ -19,18 +19,14 @@ curl -f -m 30 -s -F file="@$1" -F model="$MODEL" -F response_format=text \
      -H @- "$API" <<< "Authorization: Bearer $KEY" \
   | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/ \?— \?/ - /g' \
   | fmt -s -w 76
+set $? ${PIPESTATUS[@]}
 
-if set -- $? && [[ $1 -ne 0 ]]; then
-  case $1 in
-    6|7)
-      echo "Failed to connect to host"
-      ;;
-    28)
-      echo "Translation timed out"
-      ;;
-    *)
-      echo "Translation failed: $1"
-      ;;
-  esac >&2
-  exit 1
-fi
+if [[ $2 -eq 6 ]] || [[ $2 -eq 7 ]]; then
+  echo "Failed to connect to host"
+elif [[ $2 -eq 28 ]]; then
+  echo "Translation timed out"
+elif [[ $2 -ne 0 ]]; then
+  echo "Translation failed: $2"
+fi >&2
+
+exit $(($1 != 0))

@@ -83,23 +83,16 @@ EOF
         | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$kak_opt_roleplay_api" \
         | jq -e -f /dev/fd/5 -r \
         | fmt -u -w "$kak_opt_autowrap_column"
-      set -- $? ${PIPESTATUS[@]}
+      set $? ${PIPESTATUS[@]}
 
-      if [[ $1 -ne 0 ]]; then
-        case $3 in
-          0)
-            echo "set-register s '{Error}invalid response from model'"
-            ;;
-          6|7)
-            echo "set-register s '{Error}failed to connect to host'"
-            ;;
-          28)
-            echo "set-register s '{Error}content generation timed out'"
-            ;;
-          *)
-            echo "set-register s '{Error}content generation failed: $3'"
-            ;;
-        esac
+      if [[ $3 -eq 6 ]] || [[ $3 -eq 7 ]]; then
+        echo "set-register s '{Error}failed to connect to host'"
+      elif [[ $3 -eq 28 ]]; then
+        echo "set-register s '{Error}content generation timed out'"
+      elif [[ $3 -ne 0 ]]; then
+        echo "set-register s '{Error}content generation failed: $3'"
+      elif [[ $4 -ne 0 ]]; then
+        echo "set-register s '{Error}invalid response from model'"
       else
         echo "set-register s"
       fi > "$kak_command_fifo"

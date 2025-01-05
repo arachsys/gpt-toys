@@ -50,22 +50,16 @@ PROMPT=$* jq -f /dev/fd/3 -s -R \
   | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$API" \
   | jq -e -f /dev/fd/5 -r \
   | fmt -s -w 76
-set -- $? ${PIPESTATUS[@]}
+set $? ${PIPESTATUS[@]}
 
-if [[ $1 -ne 0 ]]; then
-  case $3 in
-    0)
-      echo "Invalid response from model"
-      ;;
-    6|7)
-      echo "Failed to connect to host"
-      ;;
-    28)
-      echo "Content generation timed out"
-      ;;
-    *)
-      echo "Content generation failed: $3"
-      ;;
-  esac >&2
-  exit 1
-fi
+if [[ $3 -eq 6 ]] || [[ $3 -eq 7 ]]; then
+  echo "Failed to connect to host"
+elif [[ $3 -eq 28 ]]; then
+  echo "Content generation timed out"
+elif [[ $3 -ne 0 ]]; then
+  echo "Content generation failed: $3"
+elif [[ $4 -ne 0 ]]; then
+  echo "Invalid response from model"
+fi >&2
+
+exit $(($1 != 0))
