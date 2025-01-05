@@ -20,7 +20,8 @@ exec 3<<EOF
   "messages": [
     { "role": "system", "content": env.PROMPT },
     { "role": "user", "content": . | rtrimstr("\\n") }
-  ]
+  ],
+  "n": (env.COUNT | tonumber? // 1)
 } | .messages[] |= select(.content and .content != "")
 EOF
 
@@ -30,22 +31,29 @@ Content-Type: application/json
 EOF
 
 exec 5<<EOF
-.choices[0].message.content,
-if .choices[0].finish_reason != "stop" then
-  "[Truncated: \\(.choices[0].finish_reason)]"
-else
-  empty
-end
+.choices
+  | map(
+      if .finish_reason == "stop" then
+        .message.content
+      else
+        .message.content + "\\n\\n[Truncated: \\(.finish_reason)]"
+      end
+    )
+  | join("\\n\\n\\n")
+  | gsub("[‘’]"; "'")
+  | gsub("[“”]"; "\\"")
+  | gsub("…"; "...")
+  | gsub("\\\\s?—\\\\s?"; " - ")
 EOF
 
 PROMPT=$* jq -f /dev/fd/3 -s -R \
   | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$API" \
   | jq -e -f /dev/fd/5 -r \
-  | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/\s\?—\s\?/ - /g' \
   | fmt -s -w 76
+set -- $? ${PIPESTATUS[@]}
 
-if set -- $? ${PIPESTATUS[1]} && [[ $1 -ne 0 ]]; then
-  case $2 in
+if [[ $1 -ne 0 ]]; then
+  case $3 in
     0)
       echo "Invalid response from model"
       ;;
@@ -56,7 +64,7 @@ if set -- $? ${PIPESTATUS[1]} && [[ $1 -ne 0 ]]; then
       echo "Content generation timed out"
       ;;
     *)
-      echo "Content generation failed: $2"
+      echo "Content generation failed: $3"
       ;;
   esac >&2
   exit 1

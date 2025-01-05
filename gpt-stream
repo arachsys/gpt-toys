@@ -30,18 +30,28 @@ Authorization: Bearer $KEY
 Content-Type: application/json
 EOF
 
+exec 5<<EOF
+fromjson?
+  | .choices[0].delta.content?
+  | gsub("[‘’]"; "'")?
+  | gsub("[“”]"; "\\"")?
+  | gsub("…"; "...")?
+  | gsub("\\\\s?—\\\\s?"; " - ")?
+EOF
+
 PROMPT=$* jq -f /dev/fd/3 -s -R \
   | curl -d @- -f -m 30 -s -H @/dev/fd/4 -N "$API" \
   | sed -n -u 's/^data:\s*//p' \
-  | jq -R --raw-output0 --unbuffered \
-       'fromjson? | .choices[0].delta.content? | values' \
-  | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/\s\?—\s\?/ - /g' -u -z \
-  | stdbuf -o 0 tr -d '\0' \
+  | jq -e -f /dev/fd/5 -j -R --unbuffered \
   | fold -s -w 76
-printf '\n'
+set -- $? ${PIPESTATUS[@]}
 
-if set -- $? ${PIPESTATUS[1]} && [[ $1 -ne 0 ]]; then
-  case $2 in
+if [[ $5 -ne 4 ]]; then
+  printf '\n'
+fi
+
+if [[ $1 -ne 0 ]]; then
+  case $3 in
     0)
       echo "Invalid response from model"
       ;;
@@ -52,7 +62,7 @@ if set -- $? ${PIPESTATUS[1]} && [[ $1 -ne 0 ]]; then
       echo "Content generation timed out"
       ;;
     *)
-      echo "Content generation failed: $2"
+      echo "Content generation failed: $3"
       ;;
   esac >&2
   exit 1
