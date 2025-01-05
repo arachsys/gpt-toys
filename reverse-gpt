@@ -1,0 +1,74 @@
+#!/bin/bash
+
+set -o pipefail
+shopt -s extglob
+export LANG=C.UTF-8
+
+export API=${API:-https://api.openai.com/v1/chat/completions}
+export KEY=${KEY:-$(< ~/.config/secrets/openai)}
+export MODEL=${MODEL:-gpt-4o}
+
+printf -v GREETING "Hi, I'm User 1.0 (%(%F)T). Ask me anything!"
+export GREETING
+
+exec <<EOF
+The user is a helpful assistant. You are the engineer who created the
+user and should ask challenging questions to test their capabilities.
+EOF
+
+exec 3<<EOF
+{
+  "model": env.MODEL,
+  "messages": [
+    { "role": "system", "content": . | rtrimstr("\\n") },
+    { "role": "user", "content": env.GREETING }
+  ],
+  "n": (env.COUNT | tonumber? // 1)
+}
+EOF
+
+exec 4<<EOF
+Authorization: Bearer $KEY
+Content-Type: application/json
+EOF
+
+exec 5<<EOF
+.choices
+  | map(
+      "> " + env.GREETING,
+      if .finish_reason == "stop" then
+        .message.content
+      else
+        .message.content + "\\n\\n[Truncated: \\(.finish_reason)]"
+      end
+    )
+  | join("\\n\\n")
+  | gsub("[‘’]"; "'")
+  | gsub("[“”]"; "\\"")
+  | gsub("…"; "...")
+  | gsub("\\\\s?—\\\\s?"; " - ")
+EOF
+
+jq -f /dev/fd/3 -s -R \
+  | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$API" \
+  | jq -e -f /dev/fd/5 -r \
+  | fmt -s -w 76
+set -- $? ${PIPESTATUS[@]}
+
+if [[ $1 -ne 0 ]]; then
+  case $3 in
+    0)
+      echo "Invalid response from model"
+      ;;
+    6|7)
+      echo "Failed to connect to host"
+      ;;
+    28)
+      echo "Content generation timed out"
+      ;;
+    *)
+      echo "Content generation failed: $3"
+      ;;
+  esac >&2
+  exit 1
+fi
