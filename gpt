@@ -18,7 +18,7 @@ exec 3<<EOF
 {
   "model": env.MODEL,
   "messages": [
-    { "role": "system", "content": env.PROMPT },
+    { "role": "developer", "content": env.PROMPT },
     { "role": "user", "content": . | rtrimstr("\\n") }
   ],
   "n": (env.COUNT | tonumber? // 1)

@@ -40,7 +40,7 @@ define-command roleplay %{
 {
   "model": env.kak_opt_roleplay_model,
   "messages": [
-    { "role": "system", "content": env.kak_opt_roleplay_prompt },
+    { "role": "developer", "content": env.kak_opt_roleplay_prompt },
     { "role": "user", "content": . }
   ],
   "n": (env.kak_count | tonumber),

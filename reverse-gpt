@@ -20,7 +20,7 @@ exec 3<<EOF
 {
   "model": env.MODEL,
   "messages": [
-    { "role": "system", "content": . | rtrimstr("\\n") },
+    { "role": "developer", "content": . | rtrimstr("\\n") },
     { "role": "user", "content": env.GREETING }
   ],
   "n": (env.COUNT | tonumber? // 1)
