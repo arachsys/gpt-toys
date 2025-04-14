@@ -3,12 +3,12 @@
 set -o pipefail
 export LANG=C.UTF-8
 
-export API=${API:-https://api.openai.com/v1/chat/completions}
+export API=${API:-https://api.openai.com/v1/responses}
 export KEY=${KEY:-$(< ~/.config/secrets/openai)}
-export MODEL=${MODEL:-gpt-4o}
+export MODEL=${MODEL:-gpt-4.1}
 
 if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ $1 == -* ]]; then
-  echo "Usage: ${0##*/} [PROMPT] < INPUT" 2>&1
+  echo "Usage: ${0##*/} [INSTRUCTIONS] < INPUT" 2>&1
   exit 64
 elif [[ -t 0 ]]; then
   exec < /dev/null
@@ -17,12 +17,14 @@ fi
 exec 3<<EOF
 {
   "model": env.MODEL,
-  "messages": [
-    { "role": "developer", "content": env.PROMPT },
-    { "role": "user", "content": . | rtrimstr("\\n") }
-  ],
-  "n": (env.COUNT | tonumber? // 1)
-} | .messages[] |= select(.content and .content != "")
+  "store": false,
+  "tools": [ { type: "web_search_preview" } ],
+  "input": . | rtrimstr("\\n")
+} | if .input == "" then
+      .input = env.PROMPT
+    elif env.PROMPT != "" then
+      .instructions = env.PROMPT
+    end
 EOF
 
 exec 4<<EOF
@@ -31,15 +33,18 @@ Content-Type: application/json
 EOF
 
 exec 5<<EOF
-.choices
-  | map(
-      if .finish_reason == "stop" then
-        .message.content
-      else
-        .message.content + "\\n\\n[Truncated: \\(.finish_reason)]"
-      end
-    )
-  | join("\\n\\n\\n")
+[ ( .output[]
+      | select(.type == "message")
+      | .content[]
+      | .text // .refusal // empty
+  ),
+  ( .incomplete_details.reason // empty
+      | "[Truncated: \\(.)]"
+  ),
+  ( .error.message // empty
+      | "[Error: \\(.)]"
+  )
+] | join("\\n\\n")
   | gsub("[‘’]"; "'")
   | gsub("[“”]"; "\\"")
   | gsub("…"; "...")

@@ -3,9 +3,9 @@
 set -o pipefail
 export LANG=C.UTF-8
 
-export API=${API:-https://api.openai.com/v1/chat/completions}
+export API=${API:-https://api.openai.com/v1/responses}
 export KEY=${KEY:-$(< ~/.config/secrets/openai)}
-export MODEL=${MODEL:-gpt-4o}
+export MODEL=${MODEL:-gpt-4.1}
 
 if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ $1 == -* ]]; then
   echo "Usage: ${0##*/} [PROMPT] < INPUT" 2>&1
@@ -17,12 +17,15 @@ fi
 exec 3<<EOF
 {
   "model": env.MODEL,
-  "messages": [
-    { "role": "developer", "content": env.PROMPT },
-    { "role": "user", "content": . | rtrimstr("\\n") }
-  ],
-  "stream": true
-} | .messages[] |= select(.content and .content != "")
+  "store": false,
+  "stream": true,
+  "tools": [ { type: "web_search_preview" } ],
+  "input": . | rtrimstr("\\n")
+} | if .input == "" then
+      .input = env.PROMPT
+    elif env.PROMPT != "" then
+      .instructions = env.PROMPT
+    end
 EOF
 
 exec 4<<EOF
@@ -32,7 +35,7 @@ EOF
 
 exec 5<<EOF
 fromjson?
-  | .choices[0].delta.content?
+  | .delta
   | gsub("[‘’]"; "'")?
   | gsub("[“”]"; "\\"")?
   | gsub("…"; "...")?

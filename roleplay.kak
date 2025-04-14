@@ -1,6 +1,6 @@
-declare-option str roleplay_api "https://api.openai.com/v1/chat/completions"
+declare-option str roleplay_api "https://api.openai.com/v1/responses"
 declare-option str roleplay_key "openai"
-declare-option str roleplay_model "gpt-4o"
+declare-option str roleplay_model "gpt-4.1"
 
 declare-option str roleplay_prompt %{
   You are an imaginative storyteller collaborating with the user to create
@@ -39,11 +39,9 @@ define-command roleplay %{
       exec 3<<EOF
 {
   "model": env.kak_opt_roleplay_model,
-  "messages": [
-    { "role": "developer", "content": env.kak_opt_roleplay_prompt },
-    { "role": "user", "content": . }
-  ],
-  "n": (env.kak_count | tonumber),
+  "store": false,
+  "instructions": env.kak_opt_roleplay_prompt,
+  "input": .
 }
 EOF
 
@@ -53,24 +51,23 @@ Content-Type: application/json
 EOF
 
       exec 5<<EOF
-.choices
-  | map(
-      if .finish_reason == "stop" then
-        .message.content + "\\n"
-      else
-        .message.content + "\\n\\n[Truncated: \\(.finish_reason)]\\n"
-      end
-    )
-  | join("\\n\\n")
+[ ( .output[]
+      | select(.type == "message")
+      | .content[]
+      | .text // .refusal // empty
+  ),
+  ( .incomplete_details.reason // empty
+      | "[Truncated: \\(.)]"
+  ),
+  ( .error.message // empty
+      | "[Error: \\(.)]"
+  )
+] | join("\\n\\n") + "\\n"
   | gsub("[‘’]"; "'")
   | gsub("[“”]"; "\\"")
   | gsub("…"; "...")
   | gsub(" ?— ?"; " - ")
 EOF
-
-      if [[ $kak_count != [1-9]*([0-9]) ]]; then
-        export kak_count=1
-      fi
 
       kak_opt_roleplay_prompt=${kak_opt_roleplay_prompt//$'\n'*( )/$'\n'}
       kak_opt_roleplay_prompt=${kak_opt_roleplay_prompt##*($'\n')}
