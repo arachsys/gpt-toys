@@ -26,9 +26,15 @@ define-command roleplay %{
     execute-keys -draft 'l{p<a-}>p;Gk"ty'
 
     set-register t %sh{
-      set -o pipefail
-      shopt -s extglob
-      export LANG=C.UTF-8
+      if test -n "$BASH_VERSION"; then
+        set -o pipefail
+        shopt -s extglob
+        export LANG=C.UTF-8
+      else
+        echo "set-register s '{Error}kakoune POSIX shell is not bash'" \
+          > "$kak_command_fifo"
+        exit 1
+      fi
 
       if [[ ! -r ~/.config/secrets/$kak_opt_roleplay_key ]]; then
         echo "set-register s '{Error}$kak_opt_roleplay_key: key not found'" \
