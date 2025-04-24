@@ -1,0 +1,54 @@
+#!/bin/bash
+
+set -o pipefail
+export LANG=C.UTF-8
+
+export API=${API:-https://api.openai.com/v1/images/generations}
+export KEY=${KEY:-$(< ~/.config/secrets/openai)}
+export MODEL=${MODEL:-gpt-image-1}
+
+if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ -t 1 ]] || [[ $1 == -* ]]; then
+  echo "Usage: ${0##*/} [PROMPT] >OUTPUT" 2>&1
+  exit 64
+elif [[ $# -ne 0 ]]; then
+  exec <<< "$*"
+fi
+
+exec 3<<EOF
+{
+  "background": env.BACKGROUND,
+  "model": env.MODEL,
+  "moderation": "low",
+  "output_compression": (env.COMPRESSION | tonumber? // null),
+  "output_format": env.FORMAT,
+  "prompt": . | rtrimstr("\\n"),
+  "quality": env.QUALITY,
+  "size": env.SIZE,
+  "style": env.STYLE
+} | .[] |= select(. and . != "")
+EOF
+
+exec 4<<EOF
+Authorization: Bearer $KEY
+Content-Type: application/json
+EOF
+
+jq -f /dev/fd/3 -s -R \
+  | curl -d @- -f -m 300 -s -H @/dev/fd/4 "$API" \
+  | jq -e -r '.data[].b64_json' \
+  | base64 -d 2>/dev/null
+set $? ${PIPESTATUS[@]}
+
+if [[ $3 -eq 6 ]] || [[ $3 -eq 7 ]]; then
+  echo "Failed to connect to host"
+elif [[ $3 -eq 28 ]]; then
+  echo "Image generation timed out"
+elif [[ $3 -ne 0 ]]; then
+  echo "Image generation failed: $3"
+elif [[ $4 -ne 0 ]]; then
+  echo "Invalid response from model"
+elif [[ $5 -ne 0 ]]; then
+  echo "Invalid base64 output from model"
+fi >&2
+
+exit $(($1 != 0))
