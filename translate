@@ -7,7 +7,7 @@ export API=${API:-https://api.openai.com/v1/audio/translations}
 export KEY=${KEY:-$(< ~/.config/secrets/openai)}
 export MODEL=${MODEL:-whisper-1}
 
-if [[ $# -ne 1 ]]; then
+if [[ $# -ne 1 ]] || [[ $1 == -* ]]; then
   echo "Usage: ${0##*/} AUDIOFILE" >&2
   exit 64
 elif [[ ! -f $1 ]]; then
@@ -15,6 +15,7 @@ elif [[ ! -f $1 ]]; then
   exit 1
 fi
 
+set -- "${1//\\/\\\\}" && set -- "\"${1//\"/\\\"}\""
 curl -f -m 30 -s -F file="@$1" -F model="$MODEL" -F response_format=text \
      -H @- "$API" <<< "Authorization: Bearer $KEY" \
   | sed -e "y/‘’“”/''\"\"/" -e 's/…/.../g' -e 's/ \?— \?/ - /g' \
