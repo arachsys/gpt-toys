@@ -3,18 +3,18 @@
 set -o pipefail
 export LANG=C.UTF-8
 
-export API=${API:-https://api.openai.com/v1/images/generations}
 export KEY=${KEY:-$(< ~/.config/secrets/openai)}
 export MODEL=${MODEL:-gpt-image-1}
 
-if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ -t 1 ]] || [[ $1 == -* ]]; then
-  echo "Usage: ${0##*/} [PROMPT] >OUTPUT" 2>&1
+if [[ -t 0 ]] && [[ $1 != [^-]* ]] || [[ -t 1 ]] || [[ $1 == -?* ]]; then
+  echo "Usage: ${0##*/} [PROMPT] [IMAGEFILE]... >OUTPUT" >&2
   exit 64
-elif [[ $# -ne 0 ]]; then
-  exec <<< "$*"
+elif [[ $1 == [^-]* ]]; then
+  exec <<< "$1"
 fi
 
-exec 3<<EOF
+if [[ $# -eq 1 ]]; then
+  exec 3<<EOF
 {
   "background": env.BACKGROUND,
   "model": env.MODEL,
@@ -28,16 +28,42 @@ exec 3<<EOF
 } | .[] |= select(. and . != "")
 EOF
 
-exec 4<<EOF
+  exec 4<<EOF
 Authorization: Bearer $KEY
 Content-Type: application/json
 EOF
 
-jq -f /dev/fd/3 -s -R \
-  | curl -d @- -f -m 300 -s -H @/dev/fd/4 "$API" \
-  | jq -e -r '.data[].b64_json' \
-  | base64 -d 2>/dev/null
-set $? ${PIPESTATUS[@]}
+  jq -f /dev/fd/3 -s -R \
+    | curl -d @- -f -m 300 -s -H @/dev/fd/4 \
+        "${API:-https://api.openai.com/v1/images/generations}" \
+    | jq -e -r '.data[].b64_json' \
+    | base64 -d 2>/dev/null
+  set $? ${PIPESTATUS[@]}
+else
+  for (( CURSOR=2; CURSOR <= $#; CURSOR += 2)); do
+    if [[ ! -f ${!CURSOR} ]]; then
+      echo "Image file not found: ${!CURSOR}" >&2
+      exit 1
+    fi
+    set -- "${@:1:CURSOR - 1}" "${!CURSOR//\\/\\\\}" "${@:CURSOR + 1}"
+    set -- "${@:1:CURSOR - 1}" "${!CURSOR//\"/\\\"}" "${@:CURSOR + 1}"
+    set -- "${@:1:CURSOR - 1}" -F "image[]=@\"${!CURSOR}\"" "${@:CURSOR + 1}"
+  done
+
+  set -- -F model="$MODEL" -F moderation=low -F prompt="<-" \
+    ${BACKGROUND:+-F background="$BACKGROUND"} \
+    ${COMPRESSION:+-F output_compression="$COMPRESSION"} \
+    ${FORMAT:+-F output_format="$FORMAT"} \
+    ${QUALITY:+-F quality="$QUALITY"} \
+    ${SIZE:+-F size="$SIZE"} \
+    ${STYLE:+-F style="$STYLE"} \
+    "${@:2}" "${API:-https://api.openai.com/v1/images/edits}"
+
+  curl -f -m 300 -s -H @/dev/fd/3 "$@" 3<<< "Authorization: Bearer $KEY" \
+    | jq -e -r '.data[].b64_json' \
+    | base64 -d 2>/dev/null
+  set $? 0 ${PIPESTATUS[@]}
+fi
 
 if [[ $3 -eq 6 ]] || [[ $3 -eq 7 ]]; then
   echo "Failed to connect to host"
