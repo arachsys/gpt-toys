@@ -57,7 +57,7 @@ Content-Type: application/json
 EOF
 
       exec 5<<EOF
-[ ( .output[]
+[ ( .output[]?
       | select(.type == "message")
       | .content[]
       | .text // .refusal // empty

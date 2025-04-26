@@ -35,7 +35,7 @@ Content-Type: application/json
 EOF
 
 PROMPT=$2 jq -f /dev/fd/3 -s -R \
-  | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$API"
+  | curl -d @- -f -m 30 -s -H @/dev/fd/4 -S "$API"
 set $? ${PIPESTATUS[@]}
 
 if [[ $2 -eq 6 ]] || [[ $2 -eq 7 ]]; then

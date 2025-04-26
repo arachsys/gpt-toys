@@ -33,13 +33,23 @@ Authorization: Bearer $KEY
 Content-Type: application/json
 EOF
 
+  exec 5<<EOF
+( .data[]?.b64_json ),
+( .error.message // empty | "\\(.)\\n" | stderr | empty )
+EOF
+
   jq -f /dev/fd/3 -s -R \
-    | curl -d @- -f -m 300 -s -H @/dev/fd/4 \
+    | curl -d @- -m 300 -s -H @/dev/fd/4 --fail-with-body \
         "${API:-https://api.openai.com/v1/images/generations}" \
-    | jq -e -r '.data[].b64_json' \
+    | jq -e -f /dev/fd/5 -r \
     | base64 -d 2>/dev/null
   set $? ${PIPESTATUS[@]}
 else
+  exec 4<<EOF
+( .data[]?.b64_json ),
+( .error.message // empty | "\\(.)\\n" | stderr | empty )
+EOF
+
   for (( CURSOR=2; CURSOR <= $#; CURSOR += 2)); do
     if [[ ! -f ${!CURSOR} ]]; then
       echo "Image file not found: ${!CURSOR}" >&2
@@ -59,8 +69,9 @@ else
     ${STYLE:+-F style="$STYLE"} \
     "${@:2}" "${API:-https://api.openai.com/v1/images/edits}"
 
-  curl -f -m 300 -s -H @/dev/fd/3 "$@" 3<<< "Authorization: Bearer $KEY" \
-    | jq -e -r '.data[].b64_json' \
+  curl -m 300 -s -H @/dev/fd/3 --fail-with-body "$@" \
+      3<<< "Authorization: Bearer $KEY" \
+    | jq -e -f /dev/fd/4 -r \
     | base64 -d 2>/dev/null
   set $? 0 ${PIPESTATUS[@]}
 fi

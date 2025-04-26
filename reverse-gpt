@@ -32,16 +32,16 @@ EOF
 
 exec 5<<EOF
 [ "> " + env.GREETING,
-  ( .output[]
+  ( .output[]?
       | select(.type == "message")
       | .content[]
-      | .text // .refusal // empty
+      | "\\(.text // .refusal // empty)\\n"
   ),
   ( .incomplete_details.reason // empty
-      | "[Truncated: \\(.)]"
+      | "[Truncated: \\(.)]\\n"
   ),
   ( .error.message // empty
-      | "[Error: \\(.)]"
+      | "\\(.)\\n" | stderr | empty
   )
 ] | join("\\n\\n")
   | gsub("[‘’]"; "'")
@@ -51,8 +51,8 @@ exec 5<<EOF
 EOF
 
 jq -f /dev/fd/3 -s -R \
-  | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$API" \
-  | jq -e -f /dev/fd/5 -r \
+  | curl -d @- -m 30 -s -H @/dev/fd/4 --fail-with-body "$API" \
+  | jq -e -f /dev/fd/5 -j \
   | fmt -s -w 76
 set $? ${PIPESTATUS[@]}
 
