@@ -1,6 +1,7 @@
-declare-option str roleplay_api "https://api.openai.com/v1/responses"
-declare-option str roleplay_key "openai"
-declare-option str roleplay_model "gpt-4.1"
+declare-option str roleplay_api "https://openrouter.ai/api/v1/chat/completions"
+declare-option str roleplay_key "openrouter"
+declare-option str roleplay_model "x-ai/grok-4"
+declare-option int roleplay_timeout 0
 
 declare-option str roleplay_prompt %{
   You are an imaginative storyteller collaborating with the user to create
@@ -45,9 +46,11 @@ define-command roleplay %{
       exec 3<<EOF
 {
   "model": env.kak_opt_roleplay_model,
-  "store": false,
-  "instructions": env.kak_opt_roleplay_prompt,
-  "input": .
+  "messages": [
+    { "role": "developer", "content": env.kak_opt_roleplay_prompt },
+    { "role": "user", "content": . }
+  ],
+  "store": false
 }
 EOF
 
@@ -57,22 +60,21 @@ Content-Type: application/json
 EOF
 
       exec 5<<EOF
-[ ( .output[]?
-      | select(.type == "message")
-      | .content[]
-      | .text // .refusal // empty
-  ),
-  ( .incomplete_details.reason // empty
-      | "[Truncated: \\(.)]"
-  ),
-  ( .error.message // empty
-      | "[Error: \\(.)]"
-  )
-] | join("\\n\\n") + "\\n"
-  | gsub("[‘’]"; "'")
-  | gsub("[“”]"; "\\"")
-  | gsub("…"; "...")
-  | gsub(" ?— ?"; " - ")
+try (
+  .choices | map(
+    .message.content,
+    if .finish_reason == "stop" then
+      empty
+    else
+      "[Truncated: \\(.finish_reason)]"
+    end
+  ) | join("\\n\\n") + "\\n"
+    | gsub("[‘’]"; "'")
+    | gsub("[“”]"; "\\"")
+    | gsub("…"; "...")
+    | gsub(" ?— ?"; " - ")
+),
+"[Error: \\(.error.message? // empty)]\\n"
 EOF
 
       kak_opt_roleplay_prompt=${kak_opt_roleplay_prompt//$'\n'*( )/$'\n'}
@@ -83,7 +85,8 @@ EOF
       printf "echo -to-file '%s' %%reg{t}\n" \
         "${kak_response_fifo//\'/\'\'}" > "$kak_command_fifo"
       jq -f /dev/fd/3 -s -R "$kak_response_fifo" \
-        | curl -d @- -f -m 30 -s -H @/dev/fd/4 "$kak_opt_roleplay_api" \
+        | curl -d @- -m "$kak_opt_roleplay_timeout" -s -H @/dev/fd/4 \
+            --fail-with-body "$kak_opt_roleplay_api" \
         | jq -e -f /dev/fd/5 -r \
         | fmt -u -w "$kak_opt_autowrap_column"
       set $? ${PIPESTATUS[@]}
