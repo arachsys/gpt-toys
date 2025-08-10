@@ -5,7 +5,8 @@ export LANG=C.UTF-8
 
 export API=${API:-https://api.openai.com/v1/responses}
 export KEY=${KEY:-$(< ~/.config/secrets/openai)}
-export MODEL=${MODEL:-gpt-4.1}
+export MODEL=${MODEL:-gpt-5}
+export TIMEOUT=${TIMEOUT:-0}
 
 if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ $1 == -* ]]; then
   echo "Usage: ${0##*/} [INSTRUCTIONS] < INPUT" 2>&1
@@ -34,14 +35,14 @@ EOF
 
 exec 5<<EOF
 [ ( .output[]?
-      | select(.type == "message")
-      | .content[]
+      | select(.type == "message")?
+      | .content[]?
       | "\\(.text // .refusal // empty)\\n"
   ),
-  ( .incomplete_details.reason // empty
+  ( .incomplete_details.reason? // empty
       | "[Truncated: \\(.)]\\n"
   ),
-  ( .error.message // empty
+  ( .error.message? // empty
       | "\\(.)\\n" | stderr | empty
   )
 ] | join("\\n\\n")
@@ -52,7 +53,7 @@ exec 5<<EOF
 EOF
 
 PROMPT=$* jq -f /dev/fd/3 -s -R \
-  | curl -d @- -m 30 -s -H @/dev/fd/4 --fail-with-body "$API" \
+  | curl -d @- -m "$TIMEOUT" -s -H @/dev/fd/4 --fail-with-body "$API" \
   | jq -e -f /dev/fd/5 -j \
   | fmt -s -w 76
 set $? ${PIPESTATUS[@]}

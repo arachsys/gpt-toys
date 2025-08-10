@@ -5,7 +5,8 @@ export LANG=C.UTF-8
 
 export API=${API:-https://api.openai.com/v1/responses}
 export KEY=${KEY:-$(< ~/.config/secrets/openai)}
-export MODEL=${MODEL:-gpt-4.1}
+export MODEL=${MODEL:-gpt-5}
+export TIMEOUT=${TIMEOUT:-0}
 
 if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ $1 == -* ]]; then
   echo "Usage: ${0##*/} [PROMPT] < INPUT" 2>&1
@@ -35,7 +36,7 @@ EOF
 
 exec 5<<EOF
 fromjson?
-  | .delta
+  | .delta?
   | gsub("[‘’]"; "'")?
   | gsub("[“”]"; "\\"")?
   | gsub("…"; "...")?
@@ -43,7 +44,7 @@ fromjson?
 EOF
 
 PROMPT=$* jq -f /dev/fd/3 -s -R \
-  | curl -d @- -f -m 30 -s -H @/dev/fd/4 -N -S "$API" \
+  | curl -d @- -f -m "$TIMEOUT" -s -H @/dev/fd/4 -N -S "$API" \
   | sed -n -u 's/^data:\s*//p' \
   | jq -e -f /dev/fd/5 -j -R --unbuffered \
   | fold -s -w 76
