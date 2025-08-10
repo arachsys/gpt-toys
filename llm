@@ -1,0 +1,68 @@
+#!/bin/bash
+
+set -o pipefail
+export LANG=C.UTF-8
+
+export API=${API:-https://openrouter.ai/api/v1/chat/completions}
+export KEY=${KEY:-$(< ~/.config/secrets/openrouter)}
+export MODEL=${MODEL:-openai/gpt-5:online}
+export TIMEOUT=${TIMEOUT:-0}
+
+if [[ -t 0 ]] && [[ $# -eq 0 ]] || [[ $1 == -* ]]; then
+  echo "Usage: ${0##*/} [INSTRUCTIONS] < INPUT" 2>&1
+  exit 64
+elif [[ -t 0 ]]; then
+  exec < /dev/null
+fi
+
+exec 3<<EOF
+{
+  "model": env.MODEL,
+  "messages": [
+    { "role": "developer", "content": env.PROMPT },
+    { "role": "user", "content": . | rtrimstr("\\n") }
+  ],
+  "store": false
+} | .messages[] |= select(.content and .content != "")
+EOF
+
+exec 4<<EOF
+Authorization: Bearer $KEY
+Content-Type: application/json
+EOF
+
+exec 5<<EOF
+try (
+  .choices | map(
+      .message.content,
+      if .finish_reason == "stop" then
+        empty
+      else
+        "[Truncated: \\(.finish_reason)]"
+      end
+  ) | join("\\n\\n")
+    | gsub("[‘’]"; "'")
+    | gsub("[“”]"; "\\"")
+    | gsub("…"; "...")
+    | gsub(" ?— ?"; " - ")
+),
+( "\\(.error.message? // empty)\\n" | stderr | empty )
+EOF
+
+PROMPT=$* jq -f /dev/fd/3 -s -R \
+  | curl -d @- -m "$TIMEOUT" -s -H @/dev/fd/4 --fail-with-body "$API" \
+  | jq -e -f /dev/fd/5 -r \
+  | fmt -s -w 76
+set $? ${PIPESTATUS[@]}
+
+if [[ $3 -eq 6 ]] || [[ $3 -eq 7 ]]; then
+  echo "Failed to connect to host"
+elif [[ $3 -eq 28 ]]; then
+  echo "Content generation timed out"
+elif [[ $3 -ne 0 ]]; then
+  echo "Content generation failed: $3"
+elif [[ $4 -ne 0 ]]; then
+  echo "Invalid response from model"
+fi >&2
+
+exit $(($1 != 0))
