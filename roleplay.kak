@@ -1,21 +1,48 @@
 declare-option str roleplay_api "https://openrouter.ai/api/v1/chat/completions"
 declare-option str roleplay_key "openrouter"
+declare-option int roleplay_length 100
 declare-option str roleplay_model "x-ai/grok-4"
+declare-option str roleplay_prompt
+declare-option str-list roleplay_prompts
 declare-option int roleplay_timeout 0
 
-declare-option str roleplay_prompt %{
+set-option -add global roleplay_prompts %{
   You are an imaginative storyteller collaborating with the user to create
   an engaging story. The user sets the scene and writes their character's
-  dialogue, thoughts, and actions in first person. Your role is to write
-  the dialogue, thoughts, and actions of other characters, keeping them
-  consistent with their established motivations, limitations, personality,
-  and backstory.
+  dialogue, thoughts, and actions in first person. You write the dialogue,
+  thoughts, and actions of other characters, keeping them true to their
+  established motivations, limitations, personality, and backstory.
 
-  Generate responses of around fifty words, broken into short paragraphs
-  where appropriate. Follow the tone and instructions provided (including
-  notes in brackets). Maintain a natural narrative flow, without directly
-  addressing the user. Incorporate moments of tension or reflection as
-  needed, and stop where you expect the user's character to act or speak.
+  Generate responses of around WORDS words, broken naturally into short
+  paragraphs. Match the narrative tense and point of view of the existing
+  text exactly. Characters written in first person must stay in first
+  person; those in third person must stay in third person. Do not change
+  between present and past tense unless the existing text does.
+
+  Mirror the story's tone, pacing, and writing style, maintaining a smooth
+  narrative flow without directly addressing the user. Where appropriate,
+  incorporate moments of tension or reflection, and bring the scene to life
+  with vivid, grounded descriptions using physical or emotional details.
+  Stop where the user's character would naturally act or speak.
+}
+
+set-option -add global roleplay_prompts %{
+  You are an imaginative storyteller collaborating with the user to create
+  an engaging story. You and the user both write the dialogue, thoughts,
+  and actions of any characters. Keep all characters true to their
+  established motivations, limitations, personalities, and backstories.
+
+  Generate responses of around WORDS words, broken naturally into short
+  paragraphs. Match the narrative tense and point of view of the existing
+  text exactly. Characters written in first person must stay in first
+  person; those in third person must stay in third person. Do not change
+  between present and past tense unless the existing text does.
+
+  Mirror the story's tone, pacing, and writing style, maintaining a smooth
+  narrative flow without directly addressing the user. Where appropriate,
+  incorporate moments of tension or reflection, and bring the scene to life
+  with vivid, grounded descriptions using physical or emotional details.
+  Stop at a natural pause where the user could continue.
 }
 
 define-command roleplay %{
@@ -43,6 +70,25 @@ define-command roleplay %{
         exit 1
       fi
 
+      if [[ $kak_count -gt 0 ]]; then
+        eval set -- "$kak_quoted_opt_roleplay_prompts"
+        kak_opt_roleplay_prompt=${!kak_count}
+        printf "set-option buffer roleplay_prompt '%s'\n" \
+          "${kak_opt_roleplay_prompt//\'/\'\'}" > "$kak_command_fifo"
+      fi
+
+      if [[ -n $kak_opt_roleplay_prompt ]]; then
+        set -- "$kak_opt_roleplay_prompt"
+      else
+        eval set -- "$kak_quoted_opt_roleplay_prompts"
+      fi
+
+      set -- "${1//WORDS/$kak_opt_roleplay_length}"
+      set -- "${1//$'\n'*( )/$'\n'}"
+      set -- "${1##*($'\n')}"
+      set -- "${1%%*($'\n')}"
+      export kak_opt_roleplay_prompt=$1
+
       exec 3<<EOF
 {
   "model": env.kak_opt_roleplay_model,
@@ -66,7 +112,7 @@ try (
     if .finish_reason == "stop" then
       empty
     else
-      "[Truncated: \\(.finish_reason)]"
+      "[Truncated: \\(.native_finish_reason // .finish_reason?)]"
     end
   ) | join("\\n\\n") + "\\n"
     | gsub("[‘’]"; "'")
@@ -74,13 +120,8 @@ try (
     | gsub("…"; "...")
     | gsub(" ?— ?"; " - ")
 ),
-"[Error: \\(.error.message? // empty)]\\n"
+"[Error \\(.error.code? // 500): \\(.error.message? // empty)]\\n"
 EOF
-
-      kak_opt_roleplay_prompt=${kak_opt_roleplay_prompt//$'\n'*( )/$'\n'}
-      kak_opt_roleplay_prompt=${kak_opt_roleplay_prompt##*($'\n')}
-      kak_opt_roleplay_prompt=${kak_opt_roleplay_prompt%%*($'\n')}
-      export kak_opt_roleplay_prompt
 
       printf "echo -to-file '%s' %%reg{t}\n" \
         "${kak_response_fifo//\'/\'\'}" > "$kak_command_fifo"
