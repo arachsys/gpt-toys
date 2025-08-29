@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="author" content="Chris Webb, chris@arachsys.com">
+  <title>Roleplay Demo</title>
+
+  <script type="module">
+    const key = document.getElementById('key');
+    key.innerText = localStorage.getItem('openrouter.ai.key');
+
+    const model = document.getElementById('model');
+    model.innerText = localStorage.getItem('openrouter.ai.model');
+
+    const prompt = document.getElementById('prompt');
+    const template = document.getElementById('template');
+    prompt.innerText = template.innerText.trim();
+    template.hidden = true;
+
+    const story = document.getElementById('story');
+    document.getElementById('continue').addEventListener('click',
+      async function(event) {
+        let text = story.innerText.trim();
+        event.target.disabled = true;
+
+        localStorage.setItem('openrouter.ai.key', key.innerText.trim());
+        localStorage.setItem('openrouter.ai.model', model.innerText.trim());
+
+        try {
+          const response = await fetch(
+            'https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${key.innerText.trim()}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': window.location.href
+              },
+              body: JSON.stringify({
+                model: model.innerText.trim(),
+                messages: [
+                  { role: 'developer', content: prompt.innerText.trim() },
+                  { role: 'user', content: text }
+                ]
+              })
+            });
+
+          const json = await response.json();
+          if (response.ok) {
+            for (const choice of json.choices) {
+              text += `\n\n${choice.message.content}`;
+              if (choice.finish_reason != 'stop') {
+                if (native_finish_reason in choice) {
+                  text += `\n\n[Truncated: ${choice.native_finish_reason}]`;
+                } else {
+                  text += `\n\n[Truncated: ${choice.finish_reason}]`;
+                }
+              }
+            }
+          } else {
+            text += `\n\n[Error: ${json.error.message}]`;
+          }
+        } catch (error) {
+          text += `\n\n\[Error: ${error.message}]`;
+        } finally {
+          story.innerText = text.trim();
+          window.getSelection().removeAllRanges();
+          document.documentElement.scrollIntoView(false);
+          event.target.disabled = false;
+          event.preventDefault();
+        }
+      });
+  </script>
+
+  <style>
+    body {
+      font: 13pt/1.5 Georgia, serif;
+      margin: 1em auto;
+      max-width: 48em;
+      padding: 0 1em;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: inherit;
+    }
+
+    div[contenteditable=plaintext-only] {
+      white-space: pre-wrap;
+      &:empty:before {
+        color: lightgray;
+        content: attr(placeholder);
+        display: block;
+        pointer-events: none;
+      }
+    }
+
+    h1 {
+      font: 15pt/2.0 Verdana, sans-serif;
+    }
+
+    input[type=file] {
+      display: none;
+    }
+
+    #key, #model {
+      font-family: ui-monospace, monospace;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Key</h1>
+  <div contenteditable="plaintext-only" id="key"
+    placeholder="OpenRouter API key"></div>
+
+  <h1>Model</h1>
+  <div contenteditable="plaintext-only" id="model"
+    placeholder="OpenRouter model"></div>
+
+  <h1>Prompt</h1>
+  <div contenteditable="plaintext-only" id="prompt"
+    placeholder="Model prompt"></div>
+  <div id="template">
+    <p>You are an imaginative storyteller collaborating with the user
+    to create an engaging story. The user sets the scene and writes
+    their character's dialogue, thoughts, and actions in first person.
+    You write the dialogue, thoughts, and actions of other characters,
+    keeping them true to their established motivations, limitations,
+    personality, and backstory.</p>
+
+    <p>Generate responses of around 200 words, broken naturally into
+    short paragraphs. Match the narrative tense and point of view of the
+    existing text exactly. Characters written in first person must stay
+    in first person; those in third person must stay in third person.
+    Do not change between present and past tense unless the existing
+    text does.</p>
+
+    <p>Mirror the story's tone, pacing, and writing style, maintaining
+    a smooth narrative flow without directly addressing the user.
+    Where appropriate, incorporate moments of tension or reflection,
+    and bring the scene to life with vivid, grounded descriptions using
+    physical or emotional details. Stop where the user's character would
+    naturally act or speak.</p>
+  </div>
+
+  <h1>Story</h1>
+  <div contenteditable="plaintext-only" id="story"
+    placeholder="The story so far..."></div>
+  <p><button id="continue" type="button">Continue</button></p>
+</body>
+</html>
