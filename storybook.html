@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="author" content="Chris Webb, chris@arachsys.com">
+  <title>Storybook Demo</title>
+
+  <script type="module">
+    const [key, model, prompt, story, guide] =
+      ['key', 'model', 'prompt', 'story', 'guide']
+        .map(id => document.getElementById(id));
+    let abort = null;
+
+    function backward() {
+      for (const story of Object.keys(localStorage)
+            .filter(key => key.startsWith('story:'))
+            .map(key => key.slice(6)).sort().reverse())
+        if (story < location.hash.slice(1))
+          return location.hash = `#${story}`;
+    }
+
+    function forward() {
+      for (const story of Object.keys(localStorage)
+            .filter(key => key.startsWith('story:'))
+            .map(key => key.slice(6)).sort())
+        if (location.hash.slice(1) < story)
+          return location.hash = `#${story}`;
+    }
+
+    async function generate() {
+      function append(text, paragraph) {
+        const selection = window.getSelection();
+        const range = document.createRange();
+
+        if (paragraph) {
+          story.innerText = story.innerText.replace(/\s+$/, '');
+          if (story.innerText.length > 0)
+            story.innerText += '\n\n';
+          story.innerText += text.replace(/^\s*\n/, '');
+        } else {
+          story.innerText += text;
+        }
+
+        range.selectNodeContents(story);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        document.documentElement.scrollIntoView(false);
+      }
+
+      function lines() {
+        const decoder = new TextDecoder();
+        let buffer = '', index;
+
+        return new TransformStream({
+          transform(chunk, controller) {
+            buffer += decoder.decode(chunk, { stream: true });
+            while ((index = buffer.indexOf('\n')) >= 0) {
+              controller.enqueue(buffer.slice(0, index));
+              buffer = buffer.slice(index + 1);
+            }
+          },
+          flush(controller) {
+            if (buffer += decoder.decode())
+              controller.enqueue(buffer);
+          }
+        });
+      }
+
+      if (abort)
+        return abort.abort();
+      abort = new AbortController();
+      story.contentEditable = false;
+
+      try {
+        const response = await fetch(
+          'https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${key.innerText.trim()}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: model.innerText.trim(),
+              messages: [
+                { role: 'developer', content: prompt.innerText },
+                { role: 'user', content: story.innerText },
+                { role: 'developer', content: guide.innerText },
+              ],
+              reasoning: {
+                'exclude': true
+              },
+              stream: true
+            }),
+            signal: abort.signal
+          });
+
+        if (response.ok) {
+          const reader = response.body.pipeThrough(lines()).getReader();
+          let line, paragraph = true;
+
+          while (!(line = await reader.read()).done) {
+            const data = line.value.match(/^data:\s*(.*)/)?.[1];
+            if (!data || data === '[DONE]')
+              continue;
+            try {
+              for (const json of JSON.parse(data).choices) {
+                if (json?.delta?.role != 'assistant')
+                  continue;
+                if (json?.delta?.content) {
+                  append(json.delta.content, paragraph);
+                  paragraph = false;
+                }
+                if (json?.finish_reason && json.finish_reason != 'stop') {
+                  append(`[Truncated: ${json?.native_finish_reason
+                            || json.finish_reason}]`, true);
+                  paragraph = true;
+                }
+              }
+            } catch (error) {
+              console.log(error, data);
+            }
+          }
+        } else {
+          const json = await response.json();
+          append(`[Error: ${json.error.message}]`, true);
+        }
+      } catch (error) {
+        if (error.name != 'AbortError')
+          append(`[Error: ${error.message}]`, true);
+      } finally {
+        localStorage.setItem(`story:${location.hash.slice(1)}`,
+          story.innerText);
+        story.contentEditable = 'plaintext-only';
+        abort = null;
+      }
+    }
+
+    for (const node of [key, model, prompt, guide]) {
+      node.innerText = localStorage.getItem(node.id);
+      node.addEventListener('input', event => localStorage.setItem(
+        node.id, node.innerText.replace(/^\s*\n|\s+$/g, '')));
+    }
+
+    for (const node of [key, model, prompt, story, guide]) {
+      node.addEventListener('focusout', event =>
+        node.innerText = node.innerText.replace(/^\s*\n|\s+$/g, ''));
+      node.contentEditable = 'plaintext-only';
+    }
+
+    for (const node of [prompt, guide])
+      if (node.innerText.trim().length == 0)
+        node.innerText = document.querySelector(`template.${node.id}`)
+          .content.textContent.replace(/^\s*\n|\s+$/g, '')
+          .replace(/([^\n])\n([^\n])/g, '$1 $2').trim();
+
+    for (const listener of ['hashchange', 'load'])
+      window.addEventListener(listener, function(event) {
+        if (location.hash.length <= 1)
+          location.hash = '#default';
+        story.innerText = localStorage.getItem(
+          `story:${location.hash.slice(1)}`);
+      });
+
+    story.addEventListener('input', function(event) {
+      const text = story.innerText.replace(/^\s*\n|\s+$/g, '');
+      if (text.length > 0)
+        localStorage.setItem(`story:${location.hash.slice(1)}`, text);
+      else
+        localStorage.removeItem(`story:${location.hash.slice(1)}`);
+    });
+
+    for (const action of [backward, forward, generate])
+      for (const node of document.querySelectorAll(`button.${action.name}`))
+        node.onclick = action;
+
+    window.addEventListener('keydown', function(event) {
+      if (event.key == 'Escape' && abort)
+        return abort.abort(), event.preventDefault();
+      if (!event.ctrlKey && !event.metaKey)
+        return;
+      if (event.key == '[')
+        return backward(), event.preventDefault();
+      if (event.key == ']')
+        return forward(), event.preventDefault();
+      if (event.key == 'Enter')
+        return generate(), event.preventDefault();
+    });
+  </script>
+
+  <style>
+    body {
+      font: 13pt/1.5 Georgia, serif;
+      margin: 1em auto;
+      max-width: 48em;
+      padding: 0 1em;
+    }
+
+    div.input {
+      margin-bottom: 2em;
+      outline-offset: 6px;
+      white-space: pre-wrap;
+      &:empty:before {
+        color: lightgray;
+        content: attr(placeholder);
+        font-family: Verdana, sans-serif;
+      }
+    }
+
+    h1 {
+      font: 15pt/2.0 Verdana, sans-serif;
+    }
+
+    h1 button {
+      all: unset;
+      cursor: pointer;
+      float: right;
+      margin-left: 1em;
+    }
+
+    #key, #model {
+      font-family: ui-monospace, monospace;
+    }
+
+    #prompt, #guide {
+      font-style: italic;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Key</h1>
+  <div class="input" id="key" placeholder="OpenRouter API key"></div>
+
+  <h1>Model</h1>
+  <div class="input" id="model" placeholder="OpenRouter model ID"></div>
+
+  <h1>Instructions</h1>
+  <div class="input" id="prompt" placeholder="Narrative guidelines"></div>
+
+  <h1>Story
+    <button title="Next story: Cmd/Ctrl+]"
+      class="forward">&gt;</button>
+    <button title="Previous story: Cmd/Ctrl+["
+      class="backward">&lt;</button>
+  </h1>
+  <div class="input" id="story" placeholder="The story so far"></div>
+
+  <h1>Guidance
+    <button title="Continue story: Cmd/Ctrl+Enter"
+      class="generate">&#10023;</button>
+  </h1>
+  <div class="input" id="guide" placeholder="Turn guidance"></div>
+</body>
+
+<template class="prompt">
+You are an imaginative storyteller collaborating with the user to create
+an engaging story.
+
+The story is told from the perspective of the user's character, who is
+the first-person narrator. The user writes this character's dialogue,
+thoughts, and actions. You write everything else: other characters,
+the environment, and events, keeping all characters consistent with
+their established motivations, limitations, personality, and backstory.
+
+Never write the user's character's dialogue, decisions, or internal
+thoughts, although you may describe how others perceive or react to them.
+Avoid resolving dramatic tension on their behalf.
+
+Match the narrative tense and point of view of the existing text exactly.
+Do not switch person or tense unless the story already does. If the user
+writes in first person, continue in first person. Mirror the story's tone,
+genre conventions, and style, maintaining smooth narrative flow without
+addressing the user directly.
+
+Reveal characters through behaviour, body language, and speech patterns
+rather than stating emotions directly. Prefer concrete sensory details
+over abstractions. Write dialogue that sounds natural: fragmented,
+idiosyncratic, shaped by who's speaking.
+
+Match pacing to the moment. When the user's intent is ambiguous, choose the
+interpretation that creates the most interesting narrative possibilities
+without contradicting established facts.
+</template>
+
+<template class="guide">
+Continue the story naturally, advancing the scene by one clear beat and
+aiming for 80-150 words. Don't rush past moments that deserve weight or
+pad with unnecessary description. Stop where the user's character would
+naturally act, speak, or react.
+</template>
+</html>
